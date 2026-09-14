@@ -16,18 +16,70 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
+/**
+ * Wrapper do SQL gerado pelo {@link SQLBuilder}.
+ * <p>
+ * Mantem a instrucao SQL e os parametros na mesma ordem dos placeholders
+ * {@code ?}, centralizando a aplicacao dos valores no {@link PreparedStatement}
+ * e o mapeamento basico do {@link ResultSet} para DTOs anotados com
+ * {@link ColumnDB}.
+ * </p>
+ * <p>
+ * Tambem oferece metodos de execucao direta para reduzir boilerplate nos DAOs:
+ * {@link #executeUpdate(Connection)} para comandos de escrita e
+ * {@link #executeQuery(Connection, Class)} para consultas.
+ * </p>
+ */
 @Getter
 public class SQLResult {
 
     private final String sql;
     private final List<Object> params;
 
+    /**
+	 * Cria o resultado de uma montagem dinamica de SQL.
+	 * <p>
+	 * Antes de armazenar a SQL, valida se a quantidade de placeholders {@code ?}
+	 * corresponde a quantidade de parametros recebidos.
+	 * </p>
+     *
+     * <pre>{@code
+     * SQLResult sql = new SQLResult(
+     *         "SELECT NOME FROM CLIENTE WHERE ID = ?",
+     *         Arrays.asList(idCliente));
+     *
+     * String nome = sql.executeScalar(conn, String.class);
+     * }</pre>
+	 *
+	 * @param sql    instrucao SQL pronta para uso em {@link PreparedStatement}
+	 * @param params valores que preenchem os placeholders {@code ?}, na ordem exata
+	 *               em que aparecem na SQL
+	 * @throws IllegalArgumentException se a quantidade de placeholders nao bater
+	 *                                  com a quantidade de parametros
+	 */
     public SQLResult(String sql, List<Object> params) {
         validarParametros(sql, params);
         this.sql = sql;
         this.params = params;
     }
 
+    /**
+	 * Executa a SQL como comando de escrita.
+	 * <p>
+	 * Deve ser usado para instrucoes como {@code INSERT}, {@code UPDATE} e
+	 * {@code DELETE}. O metodo cria o {@link PreparedStatement}, aplica os
+	 * parametros e retorna a quantidade de linhas afetadas.
+	 * </p>
+     *
+     * <pre>{@code
+     * SQLResult sql = SQLBuilder.buildUpdate(cliente, "ID = ?", id);
+     * int linhasAfetadas = sql.executeUpdate(conn);
+     * }</pre>
+	 *
+	 * @param conn conexao JDBC aberta pelo chamador
+	 * @return quantidade de linhas afetadas pelo comando
+	 * @throws Exception se houver falha ao preparar, parametrizar ou executar a SQL
+	 */
     public int executeUpdate(Connection conn) throws Exception {
         long tempoInicio = System.currentTimeMillis();
 
@@ -42,6 +94,25 @@ public class SQLResult {
         }
     }
 
+    /**
+	 * Executa a SQL como consulta e mapeia o resultado para DTOs.
+	 * <p>
+	 * O metodo cria o {@link PreparedStatement}, aplica os parametros, executa a
+	 * consulta e delega o preenchimento dos objetos para
+	 * {@link #mapearResultSet(ResultSet, Class)}.
+	 * </p>
+     *
+     * <pre>{@code
+     * SQLResult sql = SQLBuilder.buildSelect(ClienteDTO.class, "ATIVO = ?", "S");
+     * List<ClienteDTO> clientes = sql.executeQuery(conn, ClienteDTO.class);
+     * }</pre>
+	 *
+	 * @param <T>       tipo do DTO retornado
+	 * @param conn      conexao JDBC aberta pelo chamador
+	 * @param classeDTO classe concreta do DTO anotado com {@link ColumnDB}
+	 * @return lista de DTOs mapeados a partir do {@link ResultSet}
+	 * @throws Exception se houver falha ao consultar, instanciar ou mapear os DTOs
+	 */
     public <T> List<T> executeQuery(Connection conn, Class<T> classeDTO) throws Exception {
         long tempoInicio = System.currentTimeMillis();
 
@@ -57,11 +128,62 @@ public class SQLResult {
         }
     }
 
+    /**
+     * Executa a consulta e retorna somente o primeiro DTO encontrado.
+     * <p>
+     * Use quando a consulta representa uma busca unica por chave, codigo ou outro
+     * filtro que deveria retornar no maximo um registro relevante.
+     * </p>
+     *
+     * <pre>{@code
+     * SQLResult sql = SQLBuilder.buildSelect(ClienteDTO.class, "ID = ?", id);
+     * ClienteDTO cliente = sql.executeQuerySingle(conn, ClienteDTO.class);
+     * }</pre>
+     *
+     * @param <T>       tipo do DTO retornado
+     * @param conn      conexao JDBC aberta pelo chamador
+     * @param classeDTO classe concreta do DTO anotado com {@link ColumnDB}
+     * @return primeiro DTO da consulta, ou {@code null} quando nao houver linhas
+     * @throws Exception se houver falha ao consultar ou mapear os DTOs
+     */
     public <T> T executeQuerySingle(Connection conn, Class<T> classeDTO) throws Exception {
         List<T> lista = this.executeQuery(conn, classeDTO);
         return lista.isEmpty() ? null : lista.get(0);
     }
 
+    /**
+	 * Executa a instrução SQL de leitura (SELECT) e mapeia o resultado
+	 * dinamicamente para uma lista de mapas, eliminando a necessidade de uma classe
+	 * DTO específica. *
+	 * <p>
+	 * Esta abordagem é ideal para consultas genéricas, relatórios dinâmicos ou
+	 * extrações de colunas avulsas onde a criação de um DTO seria excessiva.
+	 * </p>
+	 * *
+	 * <p>
+	 * <b>Atenção:</b> As chaves do mapa (nomes das colunas) são sempre convertidas
+	 * para letras maiúsculas para manter a compatibilidade e previsibilidade com o
+	 * Oracle.
+	 * </p>
+	 *
+     *
+     * <pre>{@code
+     * SQLResult sql = new SQLResult(
+     *         "SELECT CODPROD, DESCRPROD FROM TGFPRO WHERE ATIVO = ?",
+     *         Arrays.asList("S"));
+     *
+     * List<Map<String, Object>> linhas = sql.executeQueryAsMap(conn);
+     * Object descricao = linhas.get(0).get("DESCRPROD");
+     * }</pre>
+	 *
+	 * @param conn A conexão ativa com o banco de dados (fornecida pelo DAO).
+	 * @return Uma lista onde cada {@code Map<String, Object>} representa uma linha
+	 *         retornada pelo banco. A chave do mapa é o nome da coluna (em
+	 *         UPPERCASE) e o valor é o dado bruto retornado pelo JDBC. Retorna uma
+	 *         lista vazia se a consulta não encontrar nenhum registro.
+	 * @throws Exception Caso ocorra algum erro na preparação do statement, injeção
+	 *                   de parâmetros ou execução da query.
+	 */
     public List<Map<String, Object>> executeQueryAsMap(Connection conn) throws Exception {
         long tempoInicio = System.currentTimeMillis();
         List<Map<String, Object>> lista = new ArrayList<>();
@@ -88,11 +210,51 @@ public class SQLResult {
         }
     }
 
+    /**
+     * Executa a consulta como mapa e retorna somente a primeira linha encontrada.
+     *
+     * <pre>{@code
+     * SQLResult sql = new SQLResult(
+     *         "SELECT CODPROD, DESCRPROD FROM TGFPRO WHERE CODPROD = ?",
+     *         Arrays.asList(codigoProduto));
+     *
+     * Map<String, Object> produto = sql.executeQueryAsSingleMap(conn);
+     * }</pre>
+     *
+     * @param conn conexao JDBC aberta pelo chamador
+     * @return mapa da primeira linha retornada, ou {@code null} quando nao houver
+     *         linhas
+     * @throws Exception se houver falha ao preparar, parametrizar ou executar a
+     *                   consulta
+     */
     public Map<String, Object> executeQueryAsSingleMap(Connection conn) throws Exception {
         List<Map<String, Object>> lista = this.executeQueryAsMap(conn);
         return lista.isEmpty() ? null : lista.get(0);
     }
 
+    /**
+     * Executa a consulta e retorna o valor da primeira coluna da primeira linha.
+     * <p>
+     * Quando o valor retornado pelo banco for numerico, aplica conversoes basicas
+     * para o tipo esperado usando {@link #converterParaTipoCorreto(Object, Class)}.
+     * </p>
+     *
+     * <pre>{@code
+     * SQLResult sql = new SQLResult(
+     *         "SELECT COUNT(1) FROM TGFCAB WHERE CODPARC = ?",
+     *         Arrays.asList(codigoParceiro));
+     *
+     * Long totalPedidos = sql.executeScalar(conn, Long.class);
+     * }</pre>
+     *
+     * @param <T>          tipo esperado para o valor escalar
+     * @param conn         conexao JDBC aberta pelo chamador
+     * @param tipoEsperado classe do tipo esperado pelo chamador
+     * @return valor convertido, ou {@code null} quando a consulta nao retornar
+     *         linhas ou a coluna estiver nula
+     * @throws Exception se houver falha ao preparar, parametrizar ou executar a
+     *                   consulta
+     */
     @SuppressWarnings("unchecked")
     public <T> T executeScalar(Connection conn, Class<T> tipoEsperado) throws Exception {
         long tempoInicio = System.currentTimeMillis();
@@ -118,6 +280,28 @@ public class SQLResult {
         }
     }
 
+    /**
+     * Executa a consulta e transforma as duas primeiras colunas em um dicionario.
+     * <p>
+     * A primeira coluna e usada como chave e a segunda como valor. Linhas com chave
+     * nula sao ignoradas.
+     * </p>
+     *
+     * <pre>{@code
+     * SQLResult sql = new SQLResult(
+     *         "SELECT CODTIPOPER, DESCROPER FROM TGFTOP WHERE ATIVO = ?",
+     *         Arrays.asList("S"));
+     *
+     * Map<Long, String> tiposOperacao = sql.executeAsDictionary(conn);
+     * }</pre>
+     *
+     * @param <K>  tipo esperado para as chaves
+     * @param <V>  tipo esperado para os valores
+     * @param conn conexao JDBC aberta pelo chamador
+     * @return mapa preenchido com os pares chave/valor retornados pela consulta
+     * @throws Exception se houver falha ao preparar, parametrizar ou executar a
+     *                   consulta
+     */
     @SuppressWarnings("unchecked")
     public <K, V> Map<K, V> executeAsDictionary(Connection conn) throws Exception {
         long tempoInicio = System.currentTimeMillis();
@@ -142,6 +326,18 @@ public class SQLResult {
         }
     }
 
+    /**
+	 * Valida a correspondencia entre placeholders e parametros.
+	 * <p>
+	 * A validacao protege contra erro comum de JDBC manual: SQL com quantidade de
+	 * {@code ?} diferente da lista de parametros gerada pelo builder.
+	 * </p>
+	 *
+	 * @param sql    instrucao SQL gerada
+	 * @param params parametros associados aos placeholders
+	 * @throws IllegalArgumentException se a contagem de {@code ?} for diferente da
+	 *                                  quantidade de parametros
+	 */
     private void validarParametros(String sql, List<Object> params) {
         long expected = sql.chars().filter(ch -> ch == '?').count();
         int actual = params == null ? 0 : params.size();
@@ -153,6 +349,19 @@ public class SQLResult {
         }
     }
 
+    /**
+	 * Preenche automaticamente os parametros {@code ?} no
+	 * {@link PreparedStatement}.
+	 * <p>
+	 * O indice JDBC comeca em 1. Por isso, cada item de {@link #params} e aplicado
+	 * em {@code i + 1}, evitando inversao manual de indices em INSERT, UPDATE e
+	 * SELECT.
+	 * </p>
+	 *
+	 * @param ps         statement preparado que recebera os parametros
+	 * @param parametros valores que serao aplicados ao statement
+	 * @throws SQLException se o driver JDBC falhar ao aplicar algum parametro
+	 */
     private void setParameters(PreparedStatement ps, List<Object> parametros) throws SQLException {
         if (parametros != null) {
             for (int i = 0; i < parametros.size(); i++) {
@@ -161,6 +370,34 @@ public class SQLResult {
         }
     }
 
+    /**
+	 * Le o {@link ResultSet} e transforma cada linha em uma instancia do DTO
+	 * informado.
+	 * <p>
+	 * Sao considerados apenas atributos anotados com {@link ColumnDB}. O metodo
+	 * tambem normaliza tipos comuns do Oracle/JDBC: valores numericos para
+	 * {@link Long}, {@link Integer}, {@link Double} e {@link Float}; CLOB para
+	 * {@link String}; e datas/timestamps para {@link String},
+	 * {@link java.util.Date} ou tipos JDBC compativeis.
+	 * </p>
+     *
+     * <pre>{@code
+     * SQLResult sqlResult = SQLBuilder.buildSelect(ClienteDTO.class, null);
+     *
+     * try (PreparedStatement ps = conn.prepareStatement(sqlResult.getSql())) {
+     *     try (ResultSet rs = ps.executeQuery()) {
+     *         List<ClienteDTO> clientes = sqlResult.mapearResultSet(rs, ClienteDTO.class);
+     *     }
+     * }
+     * }</pre>
+	 *
+	 * @param <T>       tipo do DTO de destino
+	 * @param rs        resultado vindo de {@code executeQuery()}
+	 * @param classeDTO classe concreta do DTO, com construtor sem argumentos
+	 * @return lista de DTOs preenchidos com os dados retornados
+	 * @throws Exception se houver falha de instanciacao, reflexao ou leitura de
+	 *                   tipos nao tratados
+	 */
     public <T> List<T> mapearResultSet(ResultSet rs, Class<T> classeDTO) throws Exception {
         List<T> resultado = new ArrayList<>();
         Field[] fields = classeDTO.getDeclaredFields();
@@ -246,6 +483,14 @@ public class SQLResult {
         return resultado;
     }
 
+    /**
+     * Converte valores numericos comuns retornados pelo JDBC para o tipo esperado.
+     *
+     * @param valorBanco   valor bruto retornado pelo banco
+     * @param tipoEsperado tipo solicitado pelo chamador
+     * @return valor convertido quando houver conversao conhecida, ou o valor
+     *         original caso contrario
+     */
     private Object converterParaTipoCorreto(Object valorBanco, Class<?> tipoEsperado) {
         if (valorBanco == null)
             return null;
@@ -264,17 +509,53 @@ public class SQLResult {
         return valorBanco;
     }
 
+    /**
+	 * Wrapper para execucao de comandos SQL em lote.
+	 * <p>
+	 * Armazena uma unica instrucao SQL e uma lista de parametros por linha. Cada
+	 * linha e aplicada ao {@link PreparedStatement}, adicionada ao lote com
+	 * {@link PreparedStatement#addBatch()} e executada em conjunto por
+	 * {@link PreparedStatement#executeBatch()}.
+	 * </p>
+	 */
     @Getter
     public static class Batch {
 
         private final String sql;
         private final List<List<Object>> batchParams;
 
+        /**
+		 * Cria um comando batch.
+         *
+         * <pre>{@code
+         * SQLResult.Batch batch = new SQLResult.Batch(
+         *         "INSERT INTO CLIENTE (ID, NOME) VALUES (?, ?)",
+         *         Arrays.asList(
+         *                 Arrays.asList(1L, "Maria"),
+         *                 Arrays.asList(2L, "Joao")));
+         * }</pre>
+		 *
+		 * @param sql         instrucao SQL unica usada por todas as linhas
+		 * @param batchParams lista de parametros por linha, na ordem dos placeholders
+		 */
         public Batch(String sql, List<List<Object>> batchParams) {
             this.sql = sql;
             this.batchParams = batchParams;
         }
 
+        /**
+		 * Executa o lote na conexao informada.
+         *
+         * <pre>{@code
+         * SQLResult.Batch batch = SQLBuilder.buildInsertBatch(clientes);
+         * int[] resultados = batch.executeBatch(conn);
+         * }</pre>
+		 *
+		 * @param conn conexao JDBC aberta pelo chamador
+		 * @return vetor com o resultado de execucao de cada linha do batch
+		 * @throws Exception se houver falha ao preparar, parametrizar ou executar o
+		 *                   lote
+		 */
         public int[] executeBatch(Connection conn) throws Exception {
             try (PreparedStatement ps = conn.prepareStatement(sql)) {
                 for (List<Object> paramsDaLinha : batchParams) {
@@ -302,12 +583,17 @@ public class SQLResult {
         return "Origem Desconhecida";
     }
 
+    /**
+     * Registra falhas e consultas lentas usando o logger configurado.
+     *
+     * @param tempoInicio instante em milissegundos capturado antes da execucao
+     * @param excecao     excecao capturada, ou {@code null} em caso de sucesso
+     */
     private void auditarPerformance(long tempoInicio, Exception excecao) {
         long tempoExecucaoMs = System.currentTimeMillis() - tempoInicio;
         String origem = obterOrigemDaChamada();
 
         if (excecao != null) {
-            // Repare na alteração: Usando o Logger Injetado do OrmConfig
             String msg = String.format("[Mini-ORM ERRO] Falha ao executar SQL. Origem: [%s] | Tempo: %d ms | SQL: %s", origem, tempoExecucaoMs, this.sql);
             OrmConfig.getLogger().error(SQLResult.class.getSimpleName(), "SQL-ERR-001", msg, excecao);
             return;
