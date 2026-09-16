@@ -43,6 +43,44 @@ public class SQLBuilder {
 	}
 
     /**
+     * Descobre o atributo que representa a chave primaria do DTO.
+     * <p>
+     * A chave primaria e o atributo anotado com
+     * {@code @ColumnDB(isPrimaryKey = true)}. Quando mais de um atributo estiver
+     * marcado, o primeiro declarado na classe e considerado a chave primaria.
+     * </p>
+     * <p>
+     * O atributo retornado ja vem com acesso reflexivo liberado, pronto para
+     * leitura e escrita via {@link Field#get(Object)} e
+     * {@link Field#set(Object, Object)}.
+     * </p>
+     *
+     * <pre>{@code
+     * Field campoId = SQLBuilder.descobrirCampoChavePrimaria(Cliente.class);
+     * String colunaId = campoId.getAnnotation(ColumnDB.class).localName();
+     * }</pre>
+     *
+     * @param classe classe do DTO com atributos anotados com {@link ColumnDB}
+     * @return atributo da chave primaria, com acesso reflexivo ja liberado
+     * @throws IllegalStateException se nenhum atributo estiver marcado como chave
+     *                               primaria
+     */
+    static Field descobrirCampoChavePrimaria(Class<?> classe) {
+        for (Field field : classe.getDeclaredFields()) {
+            ColumnDB anotacao = field.getAnnotation(ColumnDB.class);
+
+            if (anotacao != null && anotacao.isPrimaryKey()) {
+                field.setAccessible(true);
+                return field;
+            }
+        }
+
+        throw new IllegalStateException("A classe " + classe.getSimpleName()
+                + " nao possui atributo anotado com @ColumnDB(isPrimaryKey = true), "
+                + "obrigatorio para recuperar o ID gerado pelo banco.");
+    }
+
+    /**
      * Inicia a montagem fluente de um {@code SELECT} para o DTO informado.
      * <p>
      * Use esta forma quando quiser escolher somente alguns atributos do DTO ou

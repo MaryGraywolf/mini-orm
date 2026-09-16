@@ -26,8 +26,11 @@ import java.util.Map;
  * </p>
  * <p>
  * Tambem oferece metodos de execucao direta para reduzir boilerplate nos DAOs:
- * {@link #executeUpdate(Connection)} para comandos de escrita e
- * {@link #executeQuery(Connection, Class)} para consultas.
+ * {@link #executeUpdate(Connection)} para comandos de escrita,
+ * {@link #executeAndReturnId(Connection, Object)} para {@code INSERT} que precisa
+ * do ID gerado pelo banco e 
+ * {@link #executeQuery(Connection, Class)} para
+ * consultas.
  * </p>
  */
 @Getter
@@ -88,6 +91,83 @@ public class SQLResult {
             int linhas = ps.executeUpdate();
             auditarPerformance(tempoInicio, null);
             return linhas;
+        } catch (Exception e) {
+            auditarPerformance(tempoInicio, e);
+            throw e;
+        }
+    }
+
+    /**
+	 * Executa um {@code INSERT} e devolve o ID gerado pelo banco.
+	 * <p>
+	 * A coluna da chave primaria e descoberta pelo atributo anotado com
+	 * {@code @ColumnDB(isPrimaryKey = true)} e informada ao driver por
+	 * {@code prepareStatement(sql, new String[] { "ID_CLIENTE" })}. Essa forma e
+	 * obrigatoria no Oracle: com {@code Statement.RETURN_GENERATED_KEYS} o driver
+	 * devolve o {@code ROWID} da linha inserida, e nao o valor da sequence. Como o
+	 * Oracle compara o nome informado com o dicionario de dados,
+	 * {@link ColumnDB#localName()} deve estar em letras maiusculas.
+	 * </p>
+	 * <p>
+	 * Alem de retornar o ID, o metodo preenche o atributo de chave primaria do
+	 * proprio {@code dto} recebido, convertido para o tipo declarado do atributo.
+	 * </p>
+     *
+     * <pre>{@code
+     * Cliente novo = new Cliente();
+     * novo.setNome("Empresa XYZ");
+     *
+     * SQLResult sql = SQLBuilder.buildInsert(novo);
+     * Long idGerado = sql.executeAndReturnId(conn, novo);
+     *
+     * // o DTO tambem fica preenchido
+     * Long mesmoId = novo.getIdCliente();
+     * }</pre>
+	 *
+	 * @param conn conexao JDBC aberta pelo chamador
+	 * @param dto  mesmo DTO usado em {@link SQLBuilder#buildInsert(Object)}; recebe
+	 *             o ID gerado por reflexao
+	 * @return ID gerado pelo banco, convertido para {@link Long}
+	 * @throws IllegalArgumentException se {@code dto} for nulo
+	 * @throws IllegalStateException    se o DTO nao possuir atributo anotado com
+	 *                                  {@code @ColumnDB(isPrimaryKey = true)}
+	 * @throws SQLException             se o banco nao devolver o ID gerado
+	 * @throws Exception                se houver falha ao preparar, parametrizar ou
+	 *                                  executar a SQL
+	 */
+    public Long executeAndReturnId(Connection conn, Object dto) throws Exception {
+        long tempoInicio = System.currentTimeMillis();
+
+        try {
+            if (dto == null) {
+                throw new IllegalArgumentException("O DTO de destino do ID gerado nao pode ser nulo.");
+            }
+
+            Field campoId = SQLBuilder.descobrirCampoChavePrimaria(dto.getClass());
+            String colunaId = campoId.getAnnotation(ColumnDB.class).localName();
+
+            try (PreparedStatement ps = conn.prepareStatement(this.sql, new String[] { colunaId })) {
+                setParameters(ps, this.params);
+                ps.executeUpdate();
+
+                try (ResultSet chaves = ps.getGeneratedKeys()) {
+                    if (!chaves.next()) {
+                        throw new SQLException(String.format(
+                                "Falha na criacao do registro: o banco nao retornou a coluna %s.", colunaId));
+                    }
+
+                    Object idGerado = chaves.getObject(1);
+                    if (idGerado == null) {
+                        throw new SQLException(String.format(
+                                "Falha na criacao do registro: a coluna %s retornou nula.", colunaId));
+                    }
+
+                    campoId.set(dto, converterParaTipoCorreto(idGerado, campoId.getType()));
+
+                    auditarPerformance(tempoInicio, null);
+                    return (Long) converterParaTipoCorreto(idGerado, Long.class);
+                }
+            }
         } catch (Exception e) {
             auditarPerformance(tempoInicio, e);
             throw e;
@@ -484,16 +564,31 @@ public class SQLResult {
     }
 
     /**
-     * Converte valores numericos comuns retornados pelo JDBC para o tipo esperado.
+     * Converte valores comuns retornados pelo JDBC para o tipo esperado.
+     * <p>
+     * Trata as tres origens que os drivers costumam devolver: {@link BigDecimal}
+     * (padrao do Oracle), qualquer outro {@link Number} e {@link String}. Quando o
+     * valor ja e uma instancia do tipo esperado, ele e devolvido sem conversao.
+     * </p>
+     * <p>
+     * Tipos primitivos sao aceitos em {@code tipoEsperado} e resolvidos para o
+     * wrapper correspondente, o que permite usar o metodo tanto para valores
+     * escalares quanto para preencher atributos de DTO por reflection.
+     * </p>
      *
      * @param valorBanco   valor bruto retornado pelo banco
      * @param tipoEsperado tipo solicitado pelo chamador
      * @return valor convertido quando houver conversao conhecida, ou o valor
      *         original caso contrario
+     * @throws NumberFormatException se o valor for um texto que nao representa um
+     *                               numero valido para o tipo esperado
      */
     private Object converterParaTipoCorreto(Object valorBanco, Class<?> tipoEsperado) {
-        if (valorBanco == null)
-            return null;
+        if (valorBanco == null || tipoEsperado == null || tipoEsperado == Object.class)
+            return valorBanco;
+
+        if (tipoEsperado.isInstance(valorBanco))
+            return valorBanco;
 
         if (valorBanco instanceof BigDecimal) {
             BigDecimal bd = (BigDecimal) valorBanco;
@@ -506,8 +601,61 @@ public class SQLResult {
             if (tipoEsperado == String.class)
                 return bd.toPlainString();
         }
+
+        if (valorBanco instanceof Number) {
+            Number numero = (Number) valorBanco;
+            if (tipoEsperado == Long.class || tipoEsperado == long.class)
+                return numero.longValue();
+            if (tipoEsperado == Integer.class || tipoEsperado == int.class)
+                return numero.intValue();
+            if (tipoEsperado == Short.class || tipoEsperado == short.class)
+                return numero.shortValue();
+            if (tipoEsperado == Double.class || tipoEsperado == double.class)
+                return numero.doubleValue();
+            if (tipoEsperado == Float.class || tipoEsperado == float.class)
+                return numero.floatValue();
+            if (tipoEsperado == BigDecimal.class)
+                return new BigDecimal(numero.toString());
+            if (tipoEsperado == String.class)
+                return numero.toString();
+        }
+
+        if (valorBanco instanceof String) {
+            String texto = ((String) valorBanco).trim();
+            if (tipoEsperado == Long.class || tipoEsperado == long.class)
+                return Long.parseLong(texto);
+            if (tipoEsperado == Integer.class || tipoEsperado == int.class)
+                return Integer.parseInt(texto);
+            if (tipoEsperado == BigDecimal.class)
+                return new BigDecimal(texto);
+        }
+
         return valorBanco;
     }
+
+    private Object converterValorBancoParaEnum(Class<?> tipoEnum, Object valorBanco) {
+		String valorNormalizado = normalizarValorEnum(valorBanco);
+
+		for (Object constante : tipoEnum.getEnumConstants()) {
+			Enum<?> enumConstante = (Enum<?>) constante;
+
+			if (enumConstante.name().equalsIgnoreCase(valorNormalizado)) {
+				return enumConstante;
+			}
+
+			Object codigo = invocarMetodoSemArgumento(enumConstante, "getCodigo");
+			if (valoresEquivalentes(codigo, valorBanco)) {
+				return enumConstante;
+			}
+
+			Object id = invocarMetodoSemArgumento(enumConstante, "getId");
+			if (valoresEquivalentes(id, valorBanco)) {
+				return enumConstante;
+			}
+		}
+
+		return null;
+	}
 
     /**
 	 * Wrapper para execucao de comandos SQL em lote.
@@ -592,15 +740,16 @@ public class SQLResult {
     private void auditarPerformance(long tempoInicio, Exception excecao) {
         long tempoExecucaoMs = System.currentTimeMillis() - tempoInicio;
         String origem = obterOrigemDaChamada();
+        int paramCount = this.params == null ? 0 : this.params.size();
 
         if (excecao != null) {
-            String msg = String.format("[Mini-ORM ERRO] Falha ao executar SQL. Origem: [%s] | Tempo: %d ms | SQL: %s", origem, tempoExecucaoMs, this.sql);
+            String msg = String.format("[Mini-ORM ERRO] Falha ao executar SQL. Origem: [%s] | Tempo: %d ms | Params: %d", origem, tempoExecucaoMs, paramCount);
             OrmConfig.getLogger().error(SQLResult.class.getSimpleName(), "SQL-ERR-001", msg, excecao);
             return;
         }
 
         if (tempoExecucaoMs > 10000) {
-            String msg = String.format("[Mini-ORM LENTIDAO] Slow Query detectada! Origem: [%s] | Tempo: %d ms | SQL: %s", origem, tempoExecucaoMs, this.sql);
+            String msg = String.format("[Mini-ORM LENTIDAO] Slow Query detectada! Origem: [%s] | Tempo: %d ms | Params: %d", origem, tempoExecucaoMs, paramCount);
             OrmConfig.getLogger().warn(SQLResult.class.getSimpleName(), "SQL-WARN-001", msg);
         }
     }

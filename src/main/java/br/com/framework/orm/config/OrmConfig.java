@@ -73,8 +73,7 @@ public class OrmConfig {
          */
         @Override
         public void error(String origin, String code, String msg, Exception e, Object... params) {
-            System.err.println("[ERROR] " + origin + " [" + code + "] - " + msg);
-            if (e != null) e.printStackTrace();
+            System.err.println("[ERROR] " + origin + " [" + code + "] - " + msg + (e != null ? " - " + e.getMessage() : ""));
         }
     }
 }
