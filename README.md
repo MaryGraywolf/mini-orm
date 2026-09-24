@@ -50,7 +50,7 @@ import lombok.Data;
 @TableDB(name = "CLIENTES")
 public class Cliente {
 
-    @ColumnDB(localName = "ID_CLIENTE", sequence = "SEQ_CLIENTE.NEXTVAL")
+    @ColumnDB(localName = "ID_CLIENTE", sequence = "SEQ_CLIENTE.NEXTVAL", isPrimaryKey = true)
     private Long idCliente;
 
     @ColumnDB(localName = "NOME")
@@ -100,6 +100,13 @@ O framework lê a sua entidade populada e monta o SQL correspondente.
 Cliente novo = new Cliente();
 novo.setNome("Empresa XYZ");
 SQLBuilder.buildInsert(novo).executeUpdate(conn);
+
+// INSERT retornando o ID gerado pela sequence
+// Exige @ColumnDB(isPrimaryKey = true) no campo da chave primária.
+// Além de retornar o ID, o método preenche o próprio DTO.
+Cliente comId = new Cliente();
+comId.setNome("Empresa XYZ");
+Long id = SQLBuilder.buildInsert(comId).executeAndReturnId(conn, comId);
 
 // UPDATE (Cria o SET apenas com os campos não-nulos populados no DTO)
 Cliente update = new Cliente();

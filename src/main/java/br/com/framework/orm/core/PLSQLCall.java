@@ -174,11 +174,11 @@ public class PLSQLCall {
                 }
             }
 
-            auditarPerformance(tempoInicio, null, sql);
+            auditarPerformance(tempoInicio, null);
             return new Result(outValues);
 
         } catch (Exception e) {
-            auditarPerformance(tempoInicio, e, sql);
+            auditarPerformance(tempoInicio, e);
             throw e;
         }
     }
@@ -326,20 +326,21 @@ public class PLSQLCall {
      * @param excecao     excecao capturada, ou {@code null} em caso de sucesso
      * @param sql         chamada SQL executada
      */
-    private void auditarPerformance(long tempoInicio, Exception excecao, String sql) {
+    private void auditarPerformance(long tempoInicio, Exception excecao) {
         long tempoExecucaoMs = System.currentTimeMillis() - tempoInicio;
         String origem = obterOrigemDaChamada();
+        int paramCount = parameters == null ? 0 : parameters.size();
 
         if (excecao != null) {
-            String msg = String.format("[Mini-ORM PL/SQL ERRO] Falha ao executar Procedure. Origem: [%s] | Tempo: %d ms | SQL: %s",
-                    origem, tempoExecucaoMs, sql);
+            String msg = String.format("[Mini-ORM PL/SQL ERRO] Falha ao executar Procedure. Origem: [%s] | Tempo: %d ms | Procedure: %s | Params: %d",
+                    origem, tempoExecucaoMs, procedureName, paramCount);
             OrmConfig.getLogger().error(PLSQLCall.class.getSimpleName(), "PLSQL-ERR-001", msg, excecao);
             return;
         }
 
         if (tempoExecucaoMs > 3000) {
-            String msg = String.format("[Mini-ORM LENTIDAO] Procedure Lenta! Origem: [%s] | Tempo: %d ms | SQL: %s",
-                    origem, tempoExecucaoMs, sql);
+            String msg = String.format("[Mini-ORM LENTIDAO] Procedure Lenta! Origem: [%s] | Tempo: %d ms | Procedure: %s | Params: %d",
+                    origem, tempoExecucaoMs, procedureName, paramCount);
             OrmConfig.getLogger().warn(PLSQLCall.class.getSimpleName(), "PLSQL-WARN-001", msg);
         }
     }
