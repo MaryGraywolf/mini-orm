@@ -31,8 +31,8 @@ jobs:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
         run: >
           mvn clean verify org.sonarsource.scanner.maven:sonar-maven-plugin:sonar 
-          -Dsonar.projectKey=MaryGraywolf_mini-orm 
-          -Dsonar.organization=marygraywolf 
+          -Dsonar.projectKey=MaryGraywolf_mini-orm
+          -Dsonar.organization=marygraywolf2403
           -Dsonar.host.url=https://sonarcloud.io
 
   notify_failure:
