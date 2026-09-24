@@ -13,7 +13,7 @@ import java.lang.annotation.Target;
  * </p>
  *
  * <pre>{@code
- * @ColumnDB(localName = "CODPARC", sequence = "SEQ_PARCEIRO.NEXTVAL")
+ * @ColumnDB(localName = "CODPARC", sequence = "SEQ_PARCEIRO.NEXTVAL", isPrimaryKey = true)
  * private Long codigoParceiro;
  *
  * @ColumnDB(localName = "NOMEPARC")
@@ -37,4 +37,18 @@ public @interface ColumnDB {
      * @return expressao SQL da sequence, ou texto vazio quando nao houver
      */
     String sequence() default "";
+
+    /**
+     * Marca o atributo como chave primaria da tabela.
+     * <p>
+     * A marcacao e usada para recuperar o ID gerado pelo banco apos um
+     * {@code INSERT}, em
+     * {@link br.com.framework.orm.core.SQLResult#executeAndReturnId(java.sql.Connection, Object)}:
+     * o {@link #localName()} deste atributo e informado ao driver JDBC como a
+     * coluna que deve ser devolvida.
+     * </p>
+     *
+     * @return {@code true} quando o atributo representa a chave primaria
+     */
+    boolean isPrimaryKey() default false;
 }
