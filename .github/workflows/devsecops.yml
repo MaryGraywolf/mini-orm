@@ -1,0 +1,42 @@
+name: Validate Sec Ops
+
+permissions:
+  contents: read
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  build_and_test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout do código
+        uses: actions/checkout@v4
+        
+      - name: Simular execução (Build)
+        run: echo "Rodando Maven e JaCoCo..."
+
+  notify_failure:
+    needs: [build_and_test]
+    runs-on: ubuntu-latest
+    if: failure()
+
+    steps:
+      - name: Set error message variables
+        id: error_info
+        run: |
+          echo "error_message=A pipeline falhou no branch ${{ github.ref_name }}." >> $GITHUB_OUTPUT
+          echo "job_url=${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}" >> $GITHUB_OUTPUT
+          
+      - name: Enviar alerta para o Discord
+        run: |
+          curl -H "Content-Type: application/json" \
+          -d '{
+            "content": "🚨 **Falha na Pipeline DevSecOps!**\n**Repositório:** ${{ github.repository }}\n**Branch:** ${{ github.ref_name }}\n**Detalhes:** [Acessar Logs](${{ steps.error_info.outputs.job_url }})"
+          }' \
+          ${{ secrets.DISCORD_WEBHOOK }}
