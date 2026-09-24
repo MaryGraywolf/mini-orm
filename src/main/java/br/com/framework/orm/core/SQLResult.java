@@ -633,30 +633,6 @@ public class SQLResult {
         return valorBanco;
     }
 
-    private Object converterValorBancoParaEnum(Class<?> tipoEnum, Object valorBanco) {
-		String valorNormalizado = normalizarValorEnum(valorBanco);
-
-		for (Object constante : tipoEnum.getEnumConstants()) {
-			Enum<?> enumConstante = (Enum<?>) constante;
-
-			if (enumConstante.name().equalsIgnoreCase(valorNormalizado)) {
-				return enumConstante;
-			}
-
-			Object codigo = invocarMetodoSemArgumento(enumConstante, "getCodigo");
-			if (valoresEquivalentes(codigo, valorBanco)) {
-				return enumConstante;
-			}
-
-			Object id = invocarMetodoSemArgumento(enumConstante, "getId");
-			if (valoresEquivalentes(id, valorBanco)) {
-				return enumConstante;
-			}
-		}
-
-		return null;
-	}
-
     /**
 	 * Wrapper para execucao de comandos SQL em lote.
 	 * <p>
