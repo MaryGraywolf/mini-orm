@@ -16,10 +16,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout do código
-        uses: actions/checkout@v4
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
 
       - name: Configurar JDK 11
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@3a4f6e1af504cf6a31855fa899c6aa5355ba6f12
         with:
           java-version: "11"
           distribution: "temurin"
@@ -40,11 +40,16 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout do Código
-        uses: actions/checkout@v4
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
       - name: Scan de Segurança com SemGrep
-        uses: returntocorp/semgrep-action@v1
+        uses: returntocorp/semgrep-action@a06c00cb75fb04b901a18da3039d9154a1ceeb14
         with:
           config: "p/java"
+      - name: Upload do relatório do Semgrep para o GitHub
+        uses: github/codeql-action/upload-sarif@f6e388ebf0efc915c6c5b165b019ee61a6746a38
+        if: always()
+        with:
+          sarif_file: semgrep.sarif
 
   notify_failure:
     needs: [build_and_test]
