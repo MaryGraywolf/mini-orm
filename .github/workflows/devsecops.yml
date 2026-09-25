@@ -16,10 +16,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout do código
-        uses: actions/checkout@v4
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
 
       - name: Configurar JDK 11
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6
         with:
           java-version: "11"
           distribution: "temurin"
@@ -35,6 +35,24 @@ jobs:
           -Dsonar.organization=marygraywolf2403
           -Dsonar.host.url=https://sonarcloud.io
 
+  security_sast:
+    needs: [build_and_test]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout do código
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+
+      - name: Instalar e Executar Semgrep Nativo
+        run: |
+          python -m pip install --only-binary :all: semgrep==1.90.0
+          semgrep scan --config="p/java" --sarif --output=semgrep.sarif
+
+      - name: Upload do relatório para o GitHub Security
+        uses: github/codeql-action/upload-sarif@f6e388ebf0efc915c6c5b165b019ee61a6746a38
+        if: always()
+        with:
+          sarif_file: semgrep.sarif
+
   notify_failure:
     needs: [build_and_test]
     runs-on: ubuntu-latest
@@ -44,13 +62,36 @@ jobs:
       - name: Set error message variables
         id: error_info
         run: |
-          echo "error_message=A pipeline falhou no branch ${{ github.ref_name }}." >> $GITHUB_OUTPUT
-          echo "job_url=${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}" >> $GITHUB_OUTPUT
+          echo "error_message=A pipeline falhou no branch \({{ github.ref_name }}." >>\)GITHUB_OUTPUT
+          echo "job_url=\({{ github.server_url }}/\){{ github.repository }}/actions/runs/\({{ github.run_id }}" >>\)GITHUB_OUTPUT
 
-      - name: Enviar alerta para o Discord
+      - name: Enviar alerta para o Microsoft Teams
         run: |
           curl -H "Content-Type: application/json" \
           -d '{
-            "content": "🚨 **Falha na Pipeline DevSecOps!**\n**Repositório:** ${{ github.repository }}\n**Branch:** ${{ github.ref_name }}\n**Detalhes:** [Acessar Logs](${{ steps.error_info.outputs.job_url }})"
+            "@type": "MessageCard",
+            "@context": "http://schema.org/extensions",
+            "themeColor": "E81123",
+            "summary": "Falha na Pipeline DevSecOps",
+            "title": "🚨 Falha na Pipeline DevSecOps!",
+            "sections": [{
+              "activityTitle": "Ocorreu um erro durante a execução da pipeline.",
+              "facts": [{
+                "name": "Repositório:",
+                "value": "${{ github.repository }}"
+              }, {
+                "name": "Branch:",
+                "value": "${{ github.ref_name }}"
+              }],
+              "markdown": true
+            }],
+            "potentialAction": [{
+              "@type": "OpenUri",
+              "name": "Acessar Logs",
+              "targets": [{
+                "os": "default",
+                "uri": "${{ steps.error_info.outputs.job_url }}"
+              }]
+            }]
           }' \
-          ${{ secrets.DISCORD_WEBHOOK }}
+          ${{ secrets.TEAMS_WEBHOOK }}
