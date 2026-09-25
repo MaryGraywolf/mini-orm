@@ -44,7 +44,7 @@ jobs:
 
       - name: Instalar e Executar Semgrep Nativo
         run: |
-          python -m pip install semgrep
+          python -m pip install semgrep==1.90.0
           semgrep scan --config="p/java" --sarif --output=semgrep.sarif
 
       - name: Upload do relatório para o GitHub Security
