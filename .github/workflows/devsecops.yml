@@ -38,6 +38,10 @@ jobs:
   security_sast:
     needs: [build_and_test]
     runs-on: ubuntu-latest
+    permissions:
+      security-events: write
+      actions: read
+      contents: read
     steps:
       - name: Checkout do código
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
@@ -54,7 +58,7 @@ jobs:
           sarif_file: semgrep.sarif
 
   notify_failure:
-    needs: [build_and_test]
+    needs: [build_and_test, security_sast]
     runs-on: ubuntu-latest
     if: failure()
 
